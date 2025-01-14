@@ -1,0 +1,10 @@
+langchain-google-vertexai
+langgraph
+langchain
+requests
+google-auth
+requests
+azure-ai-documentintelligence
+pandas
+openpyxl
+langchain_google_community
