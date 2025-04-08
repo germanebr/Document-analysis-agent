@@ -9,7 +9,7 @@ from secret_manager import secret_manager_key_retrieve
 
 class AzureDocIntParser():
     def __init__(self) -> None:
-        app_name = "Concord AI"
+        app_name = "project-name"
 
         azr_endpoint = secret_manager_key_retrieve(app_name, Config.AZR_DOC_INT_ENDPOINT_SECRET_ID)
         azr_credential = secret_manager_key_retrieve(app_name, Config.AZR_DOC_INT_KEY_SECRET_ID)
