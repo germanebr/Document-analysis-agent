@@ -3,14 +3,18 @@ import re
 from azure.core.credentials import AzureKeyCredential #install azure-ai-documentintelligence
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult
+
 from config import Config
+from secret_manager import secret_manager_key_retrieve
 
 class AzureDocIntParser():
     def __init__(self) -> None:
-        endpoint = "{azure_document_intelligence_endpoint}"
-            
-        credential = AzureKeyCredential(Config.AZURE_DOC_INTELLIGENCE_KEY)
-        self.document_intelligence_client = DocumentIntelligenceClient(endpoint, credential)
+        app_name = "Concord AI"
+
+        azr_endpoint = secret_manager_key_retrieve(app_name, Config.AZR_DOC_INT_ENDPOINT_SECRET_ID)
+        azr_credential = secret_manager_key_retrieve(app_name, Config.AZR_DOC_INT_KEY_SECRET_ID)
+        credential = AzureKeyCredential(azr_credential)
+        self.document_intelligence_client = DocumentIntelligenceClient(azr_endpoint, credential)
 
     def docAI_read_doc(self, data:bytes) -> AnalyzeResult:
         """Creates a readable object for Azure Document Intelligence from the document path ()
@@ -61,7 +65,6 @@ class AzureDocIntParser():
                 else:
                     document_content[f"page_{current_page}"][section].append(paragraph.content)
         
-        # print("\t* Finished evaluating the document's text")
         return document_content
     
     def get_doc_tables(self, doc:AnalyzeResult) -> dict:
@@ -75,7 +78,6 @@ class AzureDocIntParser():
             tables = {f'table_{i}': '' for i in range(len(doc.tables))}
 
             for table_idx, table in enumerate(doc.tables):
-                # print(f"\t* Analyzing table {table_idx}: {((100*table_idx)/len(doc.tables)):0.2f}% done", end = "\r")
 
                 rows = [[] for _ in range(table.row_count)]
 
@@ -90,8 +92,7 @@ class AzureDocIntParser():
                 except:
                     tables[f"table_{table_idx}"] = {"page": 1,
                                                     "content": " \\n".join(rows)}
-        
-            # print("\t* Finished evaluating the document's tables")   
+         
             return tables
         else:
             return {}
@@ -106,9 +107,8 @@ class AzureDocIntParser():
         document_content = {f"row_{i}": {} for i in range(1, len(doc) + 1)}
 
         # Separate the content based on the column with the contract IDs
-        # The code was developed for a particular Excel schema. Please modify as necessary
-        icd_col = "Main header name"
-        col_content = ["Header_1", "Header_2", "Header_3"]
+        icd_col = "ICD no.\nIf not in ICD, provide reason and name of contract owner"
+        col_content = ["Key Contributor", "Nature of Contract\n\n", "Activity or Service", "Vendor  details \n\n", "Product", "Territory (Country)", "Comments"]
 
         # Organize the data based on the selected columns
         for i, row in doc.iterrows():
@@ -141,23 +141,13 @@ class AzureDocIntParser():
         # Processing for other document types
         else:
             # Create the Azure Doc Intelligence object
-            # print("Analyzing document through Azure Document Intelligence...")
             document = self.docAI_read_doc(data)
-            print("\t* Document analyzed")
 
             # Get the text data
-            print("Extracting document text...")
             doc_text = self.get_doc_text(document)
-            print("\t> Done!")
 
             # Get the table's data
-            print("Extracting document tables...")
             doc_tables = self.get_doc_tables(document)
-            print("\t> Done!")
-
-        print(doc_text)
-        print()
-        print(doc_tables)
 
         return {"filename": filename,
                 "doc_text": doc_text,
@@ -166,7 +156,7 @@ class AzureDocIntParser():
 # if __name__ == "__main__":
 #     parser = AzureDocIntParser()
 
-#     file = './sample_doc.pdf'
+#     file = 'C:/Users/GReyes15/OneDrive - JNJ/Documents/Documents/PV Assessment/docs/NO_PVA/1607540.pdf'
 
 #     doc = parser.get_azureDocAI_data(file)
 #     print(doc)

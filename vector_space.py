@@ -1,30 +1,26 @@
 import io
+import json
 import pandas as pd
 import openpyxl
 from typing import List
-from azure_doc_int import AzureDocIntParser
+
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_google_community import BigQueryVectorStore
+
+from azure_doc_int import AzureDocIntParser
 from config import Config
+
 
 class VectorSpace():
     def __init__(self,
                  paths:List[str],
-                 docs:List,
-                 chunk_size:int = 8000,
-                 overlap:float = 800) -> None:
+                 docs:List,) -> None:
         
-        self.chunk_size = chunk_size
-        self.credentials = service_account.Credentials.from_service_account_file(Config.GCP_CREDENTIALS)
-        self.overlap = overlap
+        self.credentials = service_account.Credentials.from_service_account_info(json.loads(Config.GCP_CREDENTIALS))
         self.paths = paths
         self.docs = docs
-        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size = chunk_size,
-                                                            chunk_overlap = overlap,
-                                                            separators = ["\n\n", "\n", ".", "!", "?", ",", " ", ""])
     
     def create_BQ_table(self,
                         table_id:str) -> None:
@@ -79,7 +75,7 @@ class VectorSpace():
         Inputs:
             - doc_json: the data of the document retrieved with Azure Document Intelligence including text and tables
             - doc_id: the ICD document ID
-            - cont_user_id: the ID of the ICD contract (for PV Assessment) OR the user (for document comparison)
+            - cont_user_id: the ID of the ICD contract OR the user
         Returns:
             - chunks: the list with the chunks of the document
             - metadata: the list with the corresponding metadata of each chunk"""
@@ -89,21 +85,21 @@ class VectorSpace():
         metadata = []
 
         # Divide into chunks the main text
+        # print("Dividing document into chunks...")
         for page,sections in doc_json["doc_text"].items():
             page_num = int(page.split("_")[-1])
+            # print("Got page number")
 
             for section,content in sections.items():
-                section_chunks = self.text_splitter.split_text("\n\n".join(content))
-
-                for chunk in section_chunks:
-                    meta = {"doc_id": doc_id,
-                            "contract_user_id": cont_user_id,
-                            "filename": doc_json["filename"],
-                            "section": section,
-                            "page_row": page_num,
-                            "chunk": len(chunks)}
-                    chunks.append(chunk)
-                    metadata.append(meta)
+                # Saving the whole section by page instead of chunking
+                meta = {"doc_id": doc_id,
+                        "contract_user_id": cont_user_id,
+                        "filename": doc_json["filename"],
+                        "section": section,
+                        "page_row": page_num,
+                        "chunk": len(chunks)}
+                chunks.append("\n\n".join(content))
+                metadata.append(meta)
 
         # Include the content of the tables into the chunks
         for table,values in doc_json["doc_tables"].items():
@@ -126,18 +122,20 @@ class VectorSpace():
             - metadata: the list with the metadata of every given chunk
         Returns:
             - none"""
-        
-        embedding_model = VertexAIEmbeddings(model_name = Config.GEMINI_EMBEDDING_MODEL,
-                                             project = Config.GCP_DEV_PROJECT_ID,
-                                             credentials = self.credentials)
-        
+        try:
+            embedding_model = VertexAIEmbeddings(model_name = Config.GEMINI_EMBEDDING_MODEL,
+                                                 project = Config.GCP_DEV_PROJECT_ID,
+                                                 credentials = self.credentials)
+        except Exception as e:
+            print("error at Store Vector Data BQ: ", str(e))
+        # print("embedding_model")
         bq_store = BigQueryVectorStore(project_id = Config.GCP_DEV_PROJECT_ID,
                                        location = Config.GCP_BQ_LOCATION,
                                        dataset_name = Config.GCP_BQ_DATASET,
                                        table_name = Config.GCP_BQ_EMBEDS_TABLE,
                                        embedding = embedding_model,
                                        credentials = self.credentials)
-        
+        # print("bq_store")
         _ = bq_store.add_texts(texts = chunks,
                                metadatas = metadata)
 
@@ -151,21 +149,20 @@ class VectorSpace():
         Returns:
             - report: the dictionary mentioning which documents were uploaded correctly or not"""
         
-        # self.create_BQ_table(".".join([Config.GCP_DEV_PROJECT_ID, Config.GCP_BQ_DATASET, Config.GCP_BQ_EMBEDS_TABLE]))
-
         pdf_parser = AzureDocIntParser()
         success = []
         failed = []
 
         for i, doc in enumerate(self.docs):
-            # print(f"Checking doc {i} out of {len(self.docs)-1}", end="\r")
+            print(f"Checking doc {i} out of {len(self.docs)-1}")
+            x1 = self.paths[i].split("/")[-1].rsplit(".", 1)
+            filename, file_extension = x1
 
-            filename, file_extension = self.paths[i].split("/")[-1].rsplit(".")
             print("Got filename")
 
             try:
                 pva_json_data = pdf_parser.get_azureDocAI_data(filename, file_extension, doc)
-                print(pva_json_data)
+                # print(pva_json_data)
                 print("Got document data")
 
                 chunks, metadata = self.create_text_chunks(pva_json_data, doc_id[i], cont_user_id)
@@ -230,12 +227,12 @@ def get_raw_data(path:str):
     extension = path.rsplit(".", 1)[-1]
 
     if extension not in ["xlsx", "csv"]:
-        print("Reading non-tabular file")
+        # print("Reading non-tabular file")
         with open(path, "rb") as file:
             doc_data = file.read()
         return doc_data
     else:
-        print("Reading tabular file")
+        # print("Reading tabular file")
         with open(path, 'rb') as file:
             excel_bytes = file.read()
         return read_excel_file(excel_bytes, extension)
@@ -245,8 +242,8 @@ def get_raw_data(path:str):
 #     doc_id = ["sample_word_1", "sample_word_2"]
 #     cont_user_id = "test_excel"
 
-#     document_paths = ["./doc_1.docx",
-#                       "./doc_2.docx"]
+#     document_paths = ["./Business_Contract.docx",
+#                       "./Document_Template.docx"]
     
 #     vs = VectorSpace(paths = document_paths,
 #                      docs = [get_raw_data(doc) for doc in document_paths])
